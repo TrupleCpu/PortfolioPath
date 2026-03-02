@@ -1,0 +1,5 @@
+{
+  "name": "PortfolioPath",
+  "description": "AI-powered code auditor that evaluates student code and generates a professional portfolio report.",
+  "requestFramePermissions": []
+}
