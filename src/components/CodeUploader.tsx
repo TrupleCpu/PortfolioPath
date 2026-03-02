@@ -84,78 +84,70 @@ export default function CodeUploader({ onAnalyze, isAnalyzing }: CodeUploaderPro
     }
   };
 
-  const fetchGithubContents = async (repoUrl: string) => {
-  setIsLoadingGithub(true);
-  setGithubError(null);
+  const fetchAndAuditGithub = async (repoUrl: string) => {
+    setIsLoadingGithub(true);
+    setGithubError(null);
 
-  try {
-    // Extract owner + repo from URL
-    const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
-    if (!match) throw new Error("Invalid GitHub repo URL");
+    try {
+      // Extract owner + repo from URL
+      const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+      if (!match) throw new Error("Invalid GitHub repo URL");
 
-    const owner = match[1];
-    const repo = match[2].replace(".git", "");
+      const owner = match[1];
+      const repo = match[2].replace(".git", "");
 
-    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents`;
+      // 1. Get default branch
+      const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`);
+      if (!repoRes.ok) throw new Error("Failed to fetch repository info");
+      const repoData = await repoRes.json();
+      const defaultBranch = repoData.default_branch;
 
-    const res = await fetch(apiUrl);
-    if (!res.ok) throw new Error("Failed to fetch repository contents");
+      // 2. Get recursive tree
+      const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${defaultBranch}?recursive=1`);
+      if (!treeRes.ok) throw new Error("Failed to fetch repository tree");
+      const treeData = await treeRes.json();
 
-    const data = await res.json();
-
-    if (Array.isArray(data)) {
-      setGithubFiles(
-        data.sort((a, b) =>
-          a.type === b.type ? 0 : a.type === "dir" ? -1 : 1
-        )
+      // 3. Filter for code files
+      const codeExtensions = ['.js', '.jsx', '.ts', '.tsx', '.py', '.java', '.c', '.cpp', '.html', '.css', '.rb', '.go', '.rs', '.php'];
+      const codeFiles = treeData.tree.filter((file: any) => 
+        file.type === 'blob' && 
+        codeExtensions.some(ext => file.path.endsWith(ext)) &&
+        !file.path.includes('node_modules') &&
+        !file.path.includes('dist') &&
+        !file.path.includes('build') &&
+        !file.path.includes('.next')
       );
-    } else {
-      throw new Error("Empty repository or invalid structure");
-    }
-  } catch (err: any) {
-    setGithubError(err.message);
-  } finally {
-    setIsLoadingGithub(false);
-  }
-};
 
-  const handleGithubFileClick = async (file: GitHubFile) => {
-    if (file.type === 'dir') {
-      // For simplicity in this MVP, we'll just append the path to the repo URL query
-      // A robust implementation would handle navigation state better
-      // Here we assume the user enters the root repo URL
-      // To navigate dirs, we'd need to construct the new URL or use the API's 'url' field recursively
-      // But the API returns a 'url' for the contents of the dir.
-      // Let's try fetching that.
-      try {
-        setIsLoadingGithub(true);
-        const res = await fetch(file.url); // This is the GitHub API URL
-        const data = await res.json();
-        if (Array.isArray(data)) {
-           setGithubFiles(data.sort((a, b) => (a.type === b.type ? 0 : a.type === 'dir' ? -1 : 1)));
-           setCurrentPath([...currentPath, file.name]);
+      if (codeFiles.length === 0) {
+        throw new Error("No code files found in the repository");
+      }
+
+      // Limit to top 15 files to avoid exceeding token limits or rate limits
+      const filesToFetch = codeFiles.slice(0, 15);
+      
+      let combinedCode = `// Repository: ${owner}/${repo}\n\n`;
+
+      // 4. Fetch raw contents
+      await Promise.all(filesToFetch.map(async (file: any) => {
+        try {
+          const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${defaultBranch}/${file.path}`;
+          const rawRes = await fetch(rawUrl);
+          if (rawRes.ok) {
+            const content = await rawRes.text();
+            combinedCode += `\n\n// --- File: ${file.path} ---\n${content}`;
+          }
+        } catch (e) {
+          console.error(`Failed to fetch ${file.path}`);
         }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setIsLoadingGithub(false);
-      }
-    } else {
-      // Fetch raw content
-      if (!file.download_url) return;
-      setIsLoadingGithub(true);
-      try {
-        const res = await fetch(`/api/github/raw?url=${encodeURIComponent(file.download_url)}`);
-        if (!res.ok) throw new Error('Failed to fetch file content');
-        const text = await res.text();
-        setCode(text);
-        setFileName(file.name);
-        onAnalyze(text); // Trigger analysis immediately
-      } catch (err: any) {
-        setGithubError(err.message);
-      } finally {
-        setIsLoadingGithub(false);
-      }
+      }));
+
+      // 5. Trigger analysis
+      onAnalyze(combinedCode);
+
+    } catch (err: any) {
+      setGithubError(err.message);
+    } finally {
+      setIsLoadingGithub(false);
     }
   };
 
@@ -210,11 +202,11 @@ export default function CodeUploader({ onAnalyze, isAnalyzing }: CodeUploaderPro
                   className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
                 />
                 <button
-                  onClick={() => fetchGithubContents(repoUrl)}
-                  disabled={isLoadingGithub || !repoUrl}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => fetchAndAuditGithub(repoUrl)}
+                  disabled={isLoadingGithub || !repoUrl || isAnalyzing}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {isLoadingGithub ? 'Loading...' : 'Fetch'}
+                  {isLoadingGithub || isAnalyzing ? 'Scanning...' : 'Audit Repository'}
                 </button>
               </div>
 
@@ -224,50 +216,14 @@ export default function CodeUploader({ onAnalyze, isAnalyzing }: CodeUploaderPro
                 </div>
               )}
 
-              <div className="flex-1 overflow-y-auto custom-scrollbar">
-                {githubFiles.length > 0 ? (
-                  <div className="space-y-1">
-                    {currentPath.length > 0 && (
-                      <button 
-                        onClick={() => {
-                          // Simple back navigation - strictly for MVP
-                          // Ideally we'd keep a history stack
-                          setGithubFiles([]); 
-                          setCurrentPath([]);
-                          fetchGithubContents(repoUrl);
-                        }}
-                        className="w-full flex items-center gap-3 px-3 py-2 text-slate-400 hover:bg-slate-800/50 rounded-lg transition-colors text-sm"
-                      >
-                        <ArrowLeft className="w-4 h-4" />
-                        ..
-                      </button>
-                    )}
-                    {githubFiles.map((file) => (
-                      <button
-                        key={file.path}
-                        onClick={() => handleGithubFileClick(file)}
-                        className="w-full flex items-center gap-3 px-3 py-2 text-slate-300 hover:bg-slate-800/50 hover:text-white rounded-lg transition-colors text-left group"
-                      >
-                        {file.type === 'dir' ? (
-                          <Folder className="w-4 h-4 text-blue-400 group-hover:text-blue-300" />
-                        ) : (
-                          <FileText className="w-4 h-4 text-slate-500 group-hover:text-slate-400" />
-                        )}
-                        <span className="text-sm font-mono truncate flex-1">{file.name}</span>
-                        {file.type === 'file' && (
-                          <span className="opacity-0 group-hover:opacity-100 text-xs bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded border border-emerald-500/30 transition-opacity">
-                            Scan
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-2">
-                    <Github className="w-12 h-12 opacity-20" />
-                    <p className="text-sm">Enter a repository URL to browse files</p>
-                  </div>
-                )}
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-500 space-y-4">
+                <Github className="w-16 h-16 opacity-20" />
+                <div className="text-center">
+                  <p className="text-lg font-medium text-slate-300">Audit Entire Repository</p>
+                  <p className="text-sm mt-2 max-w-md mx-auto">
+                    Enter a GitHub repository URL above. We will fetch the core code files and analyze the entire project architecture, performance, and quality.
+                  </p>
+                </div>
               </div>
             </div>
           ) : (
