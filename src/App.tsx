@@ -59,6 +59,10 @@ function App() {
             setRepositories(reposData);
           }
           setIsLoadingRepos(false);
+        } else if (userRes.status === 401) {
+          // Not logged in, clear user state
+          setUser(null);
+          setRepositories([]);
         }
       } catch (error) {
         console.error('Failed to fetch user data:', error);
@@ -589,42 +593,46 @@ function App() {
         </div>
 
         {/* Header */}
-        <header className="relative z-10 flex items-center justify-between px-8 py-6 max-w-7xl mx-auto w-full">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500 flex items-center justify-center">
-              <span className="font-bold text-[#0A0A0B] text-lg">P</span>
+        <div className="relative z-10 border-b border-slate-800/50">
+          <header className="flex items-center justify-between px-8 py-6 max-w-7xl mx-auto w-full">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded-lg bg-emerald-500/10">
+                <LayoutDashboard className="w-5 h-5 text-emerald-400" />
+              </div>
+              <span className="font-bold text-xl tracking-tight text-white">
+                Portfolio<span className="text-emerald-400">Path</span>
+              </span>
             </div>
-            <span className="font-bold text-xl tracking-tight text-white">
-              PortfolioPath <span className="text-emerald-400">AI</span>
-            </span>
-          </div>
-          <nav className="flex items-center gap-8">
-            <a href="#" className="text-sm font-medium text-slate-400 hover:text-white transition-colors">Features</a>
-            <a href="#" className="text-sm font-medium text-slate-400 hover:text-white transition-colors">Mission</a>
-            <button 
-              onClick={() => setIsHome(false)} 
-              className="px-5 py-2 rounded-full border border-slate-700 text-slate-300 text-sm font-medium hover:bg-slate-800 hover:text-white transition-colors"
-            >
-              Dashboard
-            </button>
-          </nav>
-        </header>
+            <div className="flex items-center gap-6">
+              <a 
+                href="https://github.com/AlbertCJC/PortfolioPath" 
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-sm font-medium text-slate-400 hover:text-white transition-colors"
+              >
+                <Github className="w-4 h-4" />
+                View Source
+              </a>
+              <div className="w-px h-4 bg-slate-800"></div>
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-medium">
+                <Sparkles className="w-4 h-4" />
+                AI Powered
+              </div>
+            </div>
+          </header>
+        </div>
 
         {/* Hero Section */}
         <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 text-center max-w-4xl mx-auto w-full mt-[-8vh]">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 mb-8">
-            <span className="text-sm font-medium text-emerald-400">Sustainable Career Accelerator for IT Students</span>
-          </div>
-          
           <h1 className="text-5xl md:text-7xl font-bold text-white tracking-tight mb-6 leading-tight">
-            Empower Your Code.<br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-500">
-              Accelerate Your Career.
+            Turn Your Code Into<br />
+            <span className="text-emerald-400">
+              Career Gold
             </span>
           </h1>
           
           <p className="text-lg md:text-xl text-slate-400 mb-12 max-w-2xl leading-relaxed">
-            Your AI-powered mentor for code analysis, skill tracking, and career growth. Turn your projects into a professional portfolio.
+            Upload your project code. Our AI auditor evaluates quality, performance, and generates resume-ready bullet points instantly.
           </p>
 
           <div className="w-full max-w-2xl flex flex-col items-center gap-6">
