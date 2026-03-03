@@ -44,6 +44,8 @@ function App() {
   const [user, setUser] = useState<any>(null);
   const [repositories, setRepositories] = useState<any[]>([]);
   const [isLoadingRepos, setIsLoadingRepos] = useState(false);
+  const [growthData, setGrowthData] = useState<any[]>([]);
+  const [radarData, setRadarData] = useState<any>(null);
 
   useEffect(() => {
     const fetchUserData = async () => {
@@ -59,11 +61,21 @@ function App() {
             const reposData = await reposRes.json();
             setRepositories(reposData);
           }
+          
+          const dataRes = await fetch('/api/user/data');
+          if (dataRes.ok) {
+            const data = await dataRes.json();
+            setGrowthData(data.growthData || []);
+            setRadarData(data.radarData || null);
+          }
+          
           setIsLoadingRepos(false);
         } else if (userRes.status === 401) {
           // Not logged in, clear user state
           setUser(null);
           setRepositories([]);
+          setGrowthData([]);
+          setRadarData(null);
         }
       } catch (error) {
         console.error('Failed to fetch user data:', error);
@@ -72,13 +84,14 @@ function App() {
 
     fetchUserData();
 
-    const handleMessage = (event: MessageEvent) => {
+    const handleMessage = async (event: MessageEvent) => {
       const origin = event.origin;
       if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
         return;
       }
       if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-        fetchUserData();
+        await fetchUserData();
+        navigate('/dashboard');
       }
     };
     window.addEventListener('message', handleMessage);
@@ -113,12 +126,15 @@ function App() {
       await fetch('/api/auth/logout', { method: 'POST' });
       setUser(null);
       setRepositories([]);
+      setGrowthData([]);
+      setRadarData(null);
+      navigate('/');
     } catch (error) {
       console.error('Logout error:', error);
     }
   };
 
-  const handleAnalyze = async (code: string) => {
+  const handleAnalyze = async (code: string, source: string) => {
     setIsAnalyzing(true);
     setError(null);
     navigate('/dashboard'); // Switch to dashboard view to show loading spinner
@@ -127,6 +143,28 @@ function App() {
       const result = await analyzeCode(code);
       setReportData(result);
       setActiveTab('dashboard'); // Switch to dashboard on success
+      
+      if (user) {
+        const newGrowthEntry = {
+          date: new Date().toISOString(),
+          score: result.code_review.score,
+          source: source
+        };
+        const newGrowthData = [...growthData, newGrowthEntry];
+        const newRadarData = result.skill_radar;
+        
+        setGrowthData(newGrowthData);
+        setRadarData(newRadarData);
+        
+        await fetch('/api/user/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            growthData: newGrowthData,
+            radarData: newRadarData
+          })
+        });
+      }
     } catch (err) {
       console.error(err);
       setError("Failed to analyze code. Please try again.");
@@ -144,7 +182,7 @@ function App() {
     
     try {
       const code = await fetchGithubRepo(url);
-      await handleAnalyze(code);
+      await handleAnalyze(code, url);
     } catch (err: any) {
       setError(err.message || "Failed to fetch GitHub repository.");
       setIsAnalyzing(false);
@@ -158,7 +196,7 @@ function App() {
     const reader = new FileReader();
     reader.onload = (e) => {
       if (e.target?.result) {
-        handleAnalyze(e.target.result as string);
+        handleAnalyze(e.target.result as string, file.name);
       }
     };
     reader.readAsText(file);
@@ -386,8 +424,8 @@ function App() {
           </motion.div>
         );
       case 'radar': {
-        // Fallback data in case the user hasn't re-analyzed since the schema update
-        const radarScores = reportData.skill_radar || {
+        // Use radarData from state if available, otherwise reportData, otherwise fallback
+        const radarScores = radarData || reportData?.skill_radar || {
           frontend: 45,
           backend: 85,
           devops: 30,
@@ -396,7 +434,7 @@ function App() {
           architecture: 70
         };
 
-        const radarData = [
+        const chartData = [
           { subject: 'Frontend', A: radarScores.frontend, fullMark: 100 },
           { subject: 'Backend', A: radarScores.backend, fullMark: 100 },
           { subject: 'DevOps', A: radarScores.devops, fullMark: 100 },
@@ -406,7 +444,7 @@ function App() {
         ];
 
         // Sort skills to separate Top Strengths from Areas for Growth
-        const sortedSkills = [...radarData].sort((a, b) => b.A - a.A);
+        const sortedSkills = [...chartData].sort((a, b) => b.A - a.A);
         const topStrengths = sortedSkills.filter(s => s.A >= 70);
         // If none are >= 70, just take the top 1
         if (topStrengths.length === 0) topStrengths.push(sortedSkills[0]);
@@ -424,7 +462,7 @@ function App() {
               {/* Radar Chart Card */}
               <div className="lg:col-span-2 bg-[#131825] rounded-2xl p-6 border border-slate-800/50 min-h-[400px] flex items-center justify-center">
                 <ResponsiveContainer width="100%" height={400}>
-                  <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
+                  <RadarChart cx="50%" cy="50%" outerRadius="70%" data={chartData}>
                     <PolarGrid stroke="#334155" />
                     <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 12 }} />
                     <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
@@ -614,13 +652,36 @@ function App() {
               <h1 className="text-3xl font-bold text-white tracking-tight">Growth</h1>
               <p className="text-slate-400">Track your progress over time.</p>
             </div>
-            <div className="flex flex-col items-center justify-center p-16 border border-dashed border-slate-700 rounded-2xl bg-slate-900/30 text-center">
-              <TrendingUp className="w-16 h-16 text-slate-600 mb-4" />
-              <h3 className="text-xl font-bold text-white mb-2">Historical Tracking Coming Soon</h3>
-              <p className="text-slate-400 max-w-md">
-                We're building features to track your code quality improvements across multiple projects and over time.
-              </p>
-            </div>
+            
+            {growthData && growthData.length > 0 ? (
+              <div className="bg-slate-900/50 backdrop-blur-md border border-slate-800 rounded-2xl p-8">
+                <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-emerald-400" />
+                  Code Quality History
+                </h3>
+                <div className="space-y-4">
+                  {growthData.slice().reverse().map((entry: any, index: number) => (
+                    <div key={index} className="flex items-center justify-between p-4 rounded-xl bg-slate-800/50 border border-slate-700/50">
+                      <div>
+                        <p className="font-medium text-white">{entry.source}</p>
+                        <p className="text-sm text-slate-400">{new Date(entry.date).toLocaleDateString()}</p>
+                      </div>
+                      <div className={cn("px-4 py-2 rounded-lg font-bold text-lg", getScoreBg(entry.score), getScoreColor(entry.score))}>
+                        {entry.score}/100
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center p-16 border border-dashed border-slate-700 rounded-2xl bg-slate-900/30 text-center">
+                <TrendingUp className="w-16 h-16 text-slate-600 mb-4" />
+                <h3 className="text-xl font-bold text-white mb-2">No Data Yet</h3>
+                <p className="text-slate-400 max-w-md">
+                  Analyze a repository to start tracking your code quality improvements over time.
+                </p>
+              </div>
+            )}
           </motion.div>
         );
       default:

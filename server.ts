@@ -3,9 +3,18 @@ import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import cookieParser from "cookie-parser";
+import mongoose from "mongoose";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// MongoDB Schema
+const userSchema = new mongoose.Schema({
+  githubId: { type: String, required: true, unique: true },
+  growthData: { type: mongoose.Schema.Types.Mixed, default: {} },
+  radarData: { type: mongoose.Schema.Types.Mixed, default: {} },
+});
+const User = mongoose.model('User', userSchema);
 
 async function startServer() {
   const app = express();
@@ -14,6 +23,18 @@ async function startServer() {
 
   app.use(express.json());
   app.use(cookieParser());
+
+  // Connect to MongoDB
+  if (process.env.MONGODB_URI) {
+    try {
+      await mongoose.connect(process.env.MONGODB_URI);
+      console.log("Connected to MongoDB");
+    } catch (err) {
+      console.error("MongoDB connection error:", err);
+    }
+  } else {
+    console.warn("MONGODB_URI not set. Database features will not work.");
+  }
 
   // GitHub OAuth Routes
   app.get("/api/auth/url", (req, res) => {
@@ -132,6 +153,79 @@ async function startServer() {
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch repositories" });
+    }
+  });
+
+  // User Data Routes (MongoDB)
+  app.get("/api/user/data", async (req, res) => {
+    const token = req.cookies.github_token;
+    if (!token) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    try {
+      // Get user ID from GitHub
+      const userRes = await fetch("https://api.github.com/user", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github.v3+json",
+        },
+      });
+      if (!userRes.ok) throw new Error("Failed to fetch user from GitHub");
+      const userData = await userRes.json();
+      const githubId = userData.id.toString();
+
+      let user = await User.findOne({ githubId });
+      if (!user) {
+        user = await User.create({ githubId });
+      }
+
+      res.json({
+        growthData: user.growthData,
+        radarData: user.radarData
+      });
+    } catch (error) {
+      console.error("Error fetching user data:", error);
+      res.status(500).json({ error: "Failed to fetch user data" });
+    }
+  });
+
+  app.post("/api/user/data", async (req, res) => {
+    const token = req.cookies.github_token;
+    if (!token) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    try {
+      // Get user ID from GitHub
+      const userRes = await fetch("https://api.github.com/user", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github.v3+json",
+        },
+      });
+      if (!userRes.ok) throw new Error("Failed to fetch user from GitHub");
+      const userData = await userRes.json();
+      const githubId = userData.id.toString();
+
+      const { growthData, radarData } = req.body;
+      
+      const updateData: any = {};
+      if (growthData !== undefined) updateData.growthData = growthData;
+      if (radarData !== undefined) updateData.radarData = radarData;
+
+      const user = await User.findOneAndUpdate(
+        { githubId },
+        { $set: updateData },
+        { new: true, upsert: true }
+      );
+
+      res.json({ success: true, data: user });
+    } catch (error) {
+      console.error("Error saving user data:", error);
+      res.status(500).json({ error: "Failed to save user data" });
     }
   });
 
